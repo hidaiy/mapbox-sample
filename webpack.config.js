@@ -6,8 +6,6 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 // distディレクトリのクリーンアップ
 const CleanWebpackPlugin = require('clean-webpack-plugin');
 
-// import dotenv from 'dotenv'
-// dotenv.config();
 const Dotenv = require('dotenv-webpack');
 
 module.exports = {
