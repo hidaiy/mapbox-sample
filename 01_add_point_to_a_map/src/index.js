@@ -10,6 +10,10 @@ let map = new mapboxgl.Map({
 
 map.on('click', function (e) {
 
+
+    // クリック時の緯度経度を参照する。
+    console.log(e);
+
     let features = map.queryRenderedFeatures(e.point, {
         layers: ['chicago-parks'] // replace this with the name of the layer
     });
