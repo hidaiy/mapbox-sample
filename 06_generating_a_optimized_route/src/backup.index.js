@@ -1,7 +1,6 @@
 /**
  * Turf.jsで緯度経度からGeoJSONへ変換する。
  * 空のデータソースを用意して、後から動的にポイントをマップに表示する。
- * Optimization APIでスタート、ピックアップ、ドロップオフのポイントを指定した、経路探索APIでルートを表示する。
  */
 
 
@@ -14,7 +13,14 @@ import $ from 'jquery';
 let truckLocation = [139.7369922874633, 35.679585420543944];
 // let warehouseLocation = [-83.083, 42.363];
 let warehouseLocation = [139.76457759207517, 35.6858465902274];
+let lastQueryTime = 0;
 let lastAtRestaurant = 0;
+let keepTrack = [];
+let currentSchedule = [];
+let currentRoute = null;
+let pointHopper = {};
+let pause = true;
+let speedFactor = 50;
 let truckMarker = null;
 let dropoffs = turf.featureCollection([]); // FeatureCollection
 let nothing = turf.featureCollection([]);
@@ -27,8 +33,7 @@ mapboxgl.accessToken = process.env.MAPBOX_TOKEN;
 // Initialize a map
 const map = new mapboxgl.Map({
     container: 'map', // container id
-    // style: 'mapbox://styles/mapbox/light-v9', // stylesheet location
-    style: 'mapbox://styles/yhidai/cjdb75z5y1ekt2smtkd63o61p', // stylesheet location
+    style: 'mapbox://styles/mapbox/light-v9', // stylesheet location
     center: truckLocation, // starting position
     zoom: 13 // starting zoom
 });
@@ -121,8 +126,7 @@ map.on('load', function () {
                 stops: [[12, 3], [22, 12]]
             }
         }
-    // }, 'waterway-label');
-    });
+    }, 'waterway-label');
 
 
 
@@ -149,8 +153,7 @@ map.on('load', function () {
             'text-halo-color': 'hsl(55, 11%, 96%)',
             'text-halo-width': 3
         }
-    // }, 'waterway-label');
-    });
+    }, 'waterway-label');
 
 
     // Listen for a click on the map
@@ -180,29 +183,32 @@ function newDropoff(coords) {
 
     dropoffs.features.push(feature);
     console.log('dropoffs', dropoffs);
+    pointHopper[feature.properties.key] = feature;
 
     // Make a request to the Optimization API
     $.ajax({
         method: 'GET',
         url: assembleQueryURL(),
     }).done(function(data) {
+
         console.log('API RESULT', data);
-        if (data.waypoints.length === MAXIMUM_NUMBER_OF_POINTS) {
-            window.alert('Maximum number of points reached. Read more at mapbox.com/api-documentation/#optimization.');
-            return;
-        }
+        // Create a GeoJSON feature collection
+        let routeGeoJSON = turf.featureCollection([turf.feature(data.trips[0].geometry)]);
+        console.log(routeGeoJSON);
 
         // If there is no route provided, reset
-        // Create a GeoJSON feature collection
-        let routeGeoJSON = !data.trips[0] ?
-            nothing :
-            turf.featureCollection([turf.feature(data.trips[0].geometry)]);
-        console.log('routeGeoJSON', routeGeoJSON);
-        console.log('routeGeoJSON', JSON.stringify(routeGeoJSON));
+        if (!data.trips[0]) {
+            routeGeoJSON = nothing;
+        } else {
+            // Update the `route` source by getting the route source
+            // and setting the data equal to routeGeoJSON
+            map.getSource('route')
+                .setData(routeGeoJSON);
+        }
 
-        // Update the `route` source by getting the route source
-        // and setting the data equal to routeGeoJSON
-        map.getSource('route').setData(routeGeoJSON);
+        if (data.waypoints.length === MAXIMUM_NUMBER_OF_POINTS) {
+            window.alert('Maximum number of points reached. Read more at mapbox.com/api-documentation/#optimization.');
+        }
     });
 }
 
@@ -214,31 +220,63 @@ function updateDropoffs(geojson) {
 }
 
 function assembleQueryURL() {
+
+
     console.log('lastAtRestaurant', lastAtRestaurant);
 
     // Store the location of the truck in a variable called coordinates
     let coordinates = [truckLocation]; // 緯度経度配列
     let distributions = [];
-    let restaurantIndex = coordinates.length;
-    // Add the restaurant as a coordinate
-    coordinates.push(warehouseLocation);
+    keepTrack = [truckLocation];
 
-    dropoffs.features.forEach(function(d, i) {
-        // Add dropoff to list
-        coordinates.push(d.geometry.coordinates);
-        // [coodinatesのピックアップの要素番号, ドロップオフの番号]
-        distributions.push(restaurantIndex + ',' + (coordinates.length - 1));
-    });
+    // Create an array of GeoJSON feature collections for each point
+    let restJobs = objectToArray(pointHopper); // クリックした場所を持つGeoJSON配列
+    console.log('restJobs', restJobs);
 
-    console.log('distributions',distributions);
+    // If there are actually orders from this restaurant
+    if (restJobs.length > 0) {
 
-    // APIドキュメント
-    // https://www.mapbox.com/api-documentation/#optimization
+        // Check to see if the request was made after visiting the restaurant
+        let needToPickUp = restJobs.filter(function(d, i) {
+            return d.properties.orderTime > lastAtRestaurant;
+        }).length > 0;
 
-    // 元の場所に戻る
-    let url = 'https://api.mapbox.com/optimized-trips/v1/mapbox/driving/' + coordinates.join(';') + '?distributions=' + distributions.join(';') + '&overview=full&steps=true&geometries=geojson&source=first&access_token=' + mapboxgl.accessToken;
-    // 片道
-    // let url = 'https://api.mapbox.com/optimized-trips/v1/mapbox/driving/' + coordinates.join(';') + '?roundtrip=false&destination=last&distributions=' + distributions.join(';') + '&overview=full&steps=true&geometries=geojson&source=first&access_token=' + mapboxgl.accessToken;
-    return url;
+
+
+        // If the request was made after picking up from the restaurant,
+        // Add the restaurant as an additional stop
+        let restaurantIndex = 0;
+        if (needToPickUp) {
+            restaurantIndex = coordinates.length;
+            // Add the restaurant as a coordinate
+            coordinates.push(warehouseLocation);
+            // push the restaurant itself into the array
+            keepTrack.push(pointHopper.warehouse);
+        }
+
+        restJobs.forEach(function(d, i) {
+            // Add dropoff to list
+            keepTrack.push(d);
+            coordinates.push(d.geometry.coordinates);
+            // if order not yet picked up, add a reroute
+            if (needToPickUp && d.properties.orderTime > lastAtRestaurant) {
+                distributions.push(restaurantIndex + ',' + (coordinates.length - 1));
+            }
+        });
+    }
+
+    // Set the profile to `driving`
+    // Coordinates will include the current location of the truck,
+    return 'https://api.mapbox.com/optimized-trips/v1/mapbox/driving/' + coordinates.join(';') + '?distributions=' + distributions.join(';') + '&overview=full&steps=true&geometries=geojson&source=first&access_token=' + mapboxgl.accessToken;
 }
+
+function objectToArray(obj) {
+    let keys = Object.keys(obj);
+    let routeGeoJSON = keys.map(function(key) {
+        return obj[key];
+    });
+    return routeGeoJSON;
+}
+
+
 
