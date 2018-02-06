@@ -106,6 +106,7 @@ map.on('load', function () {
         data: nothing
     });
 
+    // ルートラインのレイヤー
     map.addLayer({
         id: 'routeline-active',
         type: 'line',
