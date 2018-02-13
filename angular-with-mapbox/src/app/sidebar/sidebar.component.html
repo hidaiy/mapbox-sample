@@ -1,0 +1,16 @@
+<div class='sidebar'>
+  <div class='heading'>
+    <h1>Our locations</h1>
+  </div>
+  <div id='listings' class='listings'>
+    <div *ngFor="let s of shopService.shops.features" class="item" [class.active]="s.properties.active">
+      <a href="#" class="title" (click)="flyToStore(s)">{{s.properties.address}}</a>
+      <ng-container *ngIf="s.properties.phone">
+        <div>{{s.properties.city}}・{{s.properties.phoneFormatted}}</div>
+      </ng-container>
+      <ng-container *ngIf="!s.properties.phone">
+        <div>{{s.properties.city}}</div>
+      </ng-container>
+    </div>
+  </div>
+</div>
