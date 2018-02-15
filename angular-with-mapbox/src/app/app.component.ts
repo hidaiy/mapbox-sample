@@ -1,8 +1,8 @@
 import {Component, OnInit} from '@angular/core';
 import * as mapboxgl from 'mapbox-gl';
 import {environment} from '../environments/environment'
-import {MapService} from "./services/map.service";
-import {ShopService} from "./services/shop.service";
+import {MapService} from './services/map.service';
+import {ShopService} from './services/shop.service';
 
 @Component({
   selector: 'app-root',
